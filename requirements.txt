@@ -1,0 +1,4 @@
+flask==3.0.3
+python-telegram-bot==21.6
+openai>=1.30.0
+gunicorn==22.0.0
