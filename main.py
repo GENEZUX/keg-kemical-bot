@@ -2,15 +2,7 @@ import os
 import logging
 import asyncio
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,18 +11,6 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://keg-kemical-bot.vercel.app/webhook")
 
 app = Flask(__name__)
-
-_ptb = None
-
-def get_ptb():
-    global _ptb
-    if _ptb is None:
-        _ptb = Application.builder().token(BOT_TOKEN).build()
-        _ptb.add_handler(CommandHandler("start", start))
-        _ptb.add_handler(CommandHandler("alerta", alerta_command))
-        _ptb.add_handler(CallbackQueryHandler(button_handler))
-        _ptb.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    return _ptb
 
 # -- TEXTS --
 
@@ -111,65 +91,69 @@ def back_keyboard():
         [InlineKeyboardButton("\u2190 Menu Principal", callback_data="menu")]
     ])
 
-# -- HANDLERS --
+# -- ASYNC HELPER --
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        WELCOME, parse_mode="Markdown", reply_markup=main_keyboard()
-    )
+def run_async(coro):
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(coro)
+        loop.close()
+        return result
 
-async def alerta_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        ALERTA, parse_mode="Markdown", reply_markup=back_keyboard()
-    )
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    texts = {
-        "menu": WELCOME,
-        "catalogo": CATALOGO,
-        "drops": DROPS,
-        "comunidad": COMUNIDAD,
-        "colabs": COLABS,
-        "contacto": CONTACTO,
-        "alerta": ALERTA,
-    }
-    keyboard = main_keyboard() if data == "menu" else back_keyboard()
-    await query.edit_message_text(
-        text=texts.get(data, WELCOME), parse_mode="Markdown", reply_markup=keyboard
-    )
-
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message.text.lower()
-    if any(w in msg for w in ["hola", "hello", "hi", "hey", "buenas"]):
-        await update.message.reply_text(
-            "\U0001f5a4 Que hay! Bienvenid@ a Kemical Addiction.\nUsa el menu:",
-            reply_markup=main_keyboard()
-        )
-    elif any(w in msg for w in ["precio", "costo", "cuanto", "price"]):
-        await update.message.reply_text(
-            "\U0001f4b0 Los precios varian segun la pieza y el drop.\nRevisa el catalogo:",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("\U0001f6cd Ver Catalogo", callback_data="catalogo")
-            ]])
-        )
-    elif any(w in msg for w in ["envio", "shipping", "enviar", "deliver"]):
-        await update.message.reply_text(
-            "\U0001f69a *ENVIOS*\n\n"
-            "\U0001f1f5\U0001f1f7 Puerto Rico: 2-3 dias\n"
-            "\U0001f1fa\U0001f1f8 EEUU: 4-7 dias\n"
-            "\U0001f310 Internacional: Consultar\n\n"
-            "info@kemicaladdiction.com",
-            parse_mode="Markdown",
-            reply_markup=back_keyboard()
-        )
-    else:
-        await update.message.reply_text(
-            "\U0001f5a4 Gracias por escribir. Explora el menu:",
-            reply_markup=main_keyboard()
-        )
+async def handle_update(data):
+    bot = Bot(token=BOT_TOKEN)
+    async with bot:
+        update = Update.de_json(data, bot)
+        if update.message:
+            msg = update.message
+            text = msg.text or ""
+            chat_id = msg.chat_id
+            if text.startswith("/start"):
+                await bot.send_message(chat_id=chat_id, text=WELCOME,
+                    parse_mode="Markdown", reply_markup=main_keyboard())
+            elif text.startswith("/alerta"):
+                await bot.send_message(chat_id=chat_id, text=ALERTA,
+                    parse_mode="Markdown", reply_markup=back_keyboard())
+            elif any(w in text.lower() for w in ["precio", "costo", "cuanto", "price"]):
+                await bot.send_message(chat_id=chat_id,
+                    text="\U0001f4b0 Los precios varian segun la pieza y el drop.\nRevisa el catalogo:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("\U0001f6cd Ver Catalogo", callback_data="catalogo")
+                    ]]))
+            elif any(w in text.lower() for w in ["envio", "shipping", "enviar", "deliver"]):
+                await bot.send_message(chat_id=chat_id,
+                    text="\U0001f69a *ENVIOS*\n\n\U0001f1f5\U0001f1f7 Puerto Rico: 2-3 dias\n\U0001f1fa\U0001f1f8 EEUU: 4-7 dias\n\U0001f310 Internacional: Consultar\n\ninfo@kemicaladdiction.com",
+                    parse_mode="Markdown", reply_markup=back_keyboard())
+            elif any(w in text.lower() for w in ["hola", "hello", "hi", "hey", "buenas"]):
+                await bot.send_message(chat_id=chat_id,
+                    text="\U0001f5a4 Que hay! Bienvenid@ a Kemical Addiction.\nUsa el menu:",
+                    reply_markup=main_keyboard())
+            elif text and not text.startswith("/"):
+                await bot.send_message(chat_id=chat_id,
+                    text="\U0001f5a4 Gracias por escribir. Explora el menu:",
+                    reply_markup=main_keyboard())
+        elif update.callback_query:
+            q = update.callback_query
+            await bot.answer_callback_query(q.id)
+            texts = {
+                "menu": WELCOME, "catalogo": CATALOGO, "drops": DROPS,
+                "comunidad": COMUNIDAD, "colabs": COLABS,
+                "contacto": CONTACTO, "alerta": ALERTA,
+            }
+            keyboard = main_keyboard() if q.data == "menu" else back_keyboard()
+            await bot.edit_message_text(
+                chat_id=q.message.chat_id,
+                message_id=q.message.message_id,
+                text=texts.get(q.data, WELCOME),
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
 
 # -- FLASK ROUTES --
 
@@ -179,22 +163,17 @@ def index():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    ptb = get_ptb()
     data = request.get_json(force=True)
-    update = Update.de_json(data, ptb.bot)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(ptb.process_update(update))
-    loop.close()
+    run_async(handle_update(data))
     return "ok", 200
 
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
-    ptb = get_ptb()
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(ptb.bot.set_webhook(url=WEBHOOK_URL))
-    loop.close()
+    async def _set():
+        bot = Bot(token=BOT_TOKEN)
+        async with bot:
+            await bot.set_webhook(url=WEBHOOK_URL)
+    run_async(_set())
     return f"Webhook set to {WEBHOOK_URL}", 200
 
 if __name__ == "__main__":
