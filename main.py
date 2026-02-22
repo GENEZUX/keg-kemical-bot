@@ -1,106 +1,205 @@
 import os
-import asyncio
 import logging
-from flask import Flask, request, jsonify
-from telegram import Update
+from flask import Flask, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
+    CallbackQueryHandler,
     MessageHandler,
     filters,
-    ContextTypes
+    ContextTypes,
 )
-from openai import OpenAI
 
-# Logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask app
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+
 app = Flask(__name__)
 
-# Config
-TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
-OPENAI_API_KEY = os.environ.get('OPENAI_KEY', '')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
+ptb_app = Application.builder().token(BOT_TOKEN).build()
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# ── TEXTS ──────────────────────────────────────────────────────────────────
 
-# Prompt del sistema - CLAVE para el comportamiento perfecto
-SYSTEM_PROMPT = """Eres KEG (KEMICAL Extreme Graphic), un asistente de IA avanzado con capacidad de razonamiento profundo.
+WELCOME = (
+    "\U0001f5a4 *KEMICAL ADDICTION* \U0001f5a4\n"
+    "_Tu universo de moda urbana, streetwear y cultura_\n\n"
+    "Bienvenid@ a la experiencia mas raw y autentica del underground fashion.\n\n"
+    "Elige una opcion:"
+)
 
-REGLAS ABSOLUTAS:
-1. ESCRIBES SIEMPRE EN ESPAÑOL PERFECTO - Sin una sola falta de ortografía, acentuación correcta, gramática impecable.
-2. Tus respuestas son estructuradas, lógicas y profundas - razonas paso a paso.
-3. Si el usuario escribe con errores, entiendes su intención y respondes correctamente.
-4. Tono: directo, preciso, con personalidad KEMICAL (potente, sin rodeos).
-5. Eres experto en generación multimedia y razonamiento técnico."""
+CATALOGO = (
+    "\U0001f6cd *CATALOGO KEMICAL*\n\n"
+    "\U0001f525 *Streetwear*\n"
+    "Tees, hoodies, cargos y mas piezas con actitud.\n\n"
+    "\U0001f451 *Accesorios*\n"
+    "Gorras, bags, cadenas, cinturones statement.\n\n"
+    "\U0001f45f *Footwear*\n"
+    "Colabs exclusivos y drops limitados.\n\n"
+    "\U0001f4e6 *Drops Especiales*\n"
+    "Ediciones limitadas solo para la comunidad Kemical.\n\n"
+    "Visita: https://kemicaladdiction.com"
+)
 
-# ======== HANDLERS ========
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome = """🔥 *KEG - KEMICAL Extreme Graphic ACTIVADO*
+DROPS = (
+    "\u26a1 *PROXIMOS DROPS*\n\n"
+    "\U0001f4cc *KEMICAL x UNDERGROUND* — Pronto\n"
+    "Una coleccion nacida en las calles, diseñada para los que viven el juego.\n\n"
+    "\U0001f4cc *DARK SEASON VOL.2* — En camino\n"
+    "Paleta oscura, cortes oversize, energia pura.\n\n"
+    "\U0001f514 Activar alertas de drops: /alerta\n"
+    "No te pierdas ninguna pieza exclusiva."
+)
 
-Soy un asistente con razonamiento profundo y ortografía perfecta.
+COMUNIDAD = (
+    "\U0001f30d *LA COMUNIDAD KEMICAL*\n\n"
+    "Somos mas que una marca. Somos un movimiento.\n\n"
+    "\U0001f4f1 Instagram: @kemicaladdiction\n"
+    "\U0001f3b5 TikTok: @kemicaladdiction\n"
+    "\U0001f4e2 Canal Telegram: t.me/kemicaladdictionoficial\n\n"
+    "Comparte tu look con *#KEMICAL* y aparezcas en nuestro feed.\n"
+    "La calle es la pasarela."
+)
 
-*Comandos:*
-• /imagen [descripción] - (Próximamente local)
-• /help - Guía de uso
+COLABS = (
+    "\U0001f91d *COLABORACIONES*\n\n"
+    "\U0001f3a8 *Para artistas y creadores:*\n"
+    "Diseña con nosotros. Tu vision + la estetica Kemical = algo unico.\n\n"
+    "\U0001f4f8 *Para influencers y content creators:*\n"
+    "Programa de embajadores activo. DM o escribe aqui.\n\n"
+    "\U0001f4e7 Contacto: collabs@kemicaladdiction.com\n"
+    "Tambien puedes escribirnos directamente en este chat."
+)
 
-Háblame de lo que necesites."""
-    await update.message.reply_text(welcome, parse_mode="Markdown")
+CONTACTO = (
+    "\U0001f4ac *CONTACTO DIRECTO*\n\n"
+    "\u2753 Preguntas sobre pedidos, tallas o envios:\n"
+    "Escribe aqui y te respondemos.\n\n"
+    "\U0001f4e7 Email: info@kemicaladdiction.com\n"
+    "\U0001f4f1 IG DM: @kemicaladdiction\n\n"
+    "Horario de atencion: Lun-Vie 10am-7pm (AST)"
+)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_text = update.message.text
-    
-    # Simple log
-    logger.info(f"User {user_id}: {user_text}")
-    
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_text}
-            ],
-            temperature=0.7
+ALERTA = (
+    "\U0001f514 *ALERTAS DE DROPS ACTIVADAS*\n\n"
+    "Ahora eres parte del inner circle Kemical.\n"
+    "Seras el primero en saber cuando caigan nuevas piezas.\n\n"
+    "Mantente atento a este chat.\n"
+    "\U0001f5a4 #KEMICAL"
+)
+
+# ── KEYBOARDS ──────────────────────────────────────────────────────────────
+
+def main_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("\U0001f6cd Catalogo", callback_data="catalogo"),
+         InlineKeyboardButton("\u26a1 Drops", callback_data="drops")],
+        [InlineKeyboardButton("\U0001f30d Comunidad", callback_data="comunidad"),
+         InlineKeyboardButton("\U0001f91d Colaboraciones", callback_data="colabs")],
+        [InlineKeyboardButton("\U0001f4ac Contacto", callback_data="contacto"),
+         InlineKeyboardButton("\U0001f514 Alertas Drop", callback_data="alerta")],
+    ])
+
+def back_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("\u2190 Volver al Menu", callback_data="menu")]
+    ])
+
+# ── HANDLERS ───────────────────────────────────────────────────────────────
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        WELCOME, parse_mode="Markdown", reply_markup=main_keyboard()
+    )
+
+async def alerta_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        ALERTA, parse_mode="Markdown", reply_markup=back_keyboard()
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    texts = {
+        "menu": WELCOME,
+        "catalogo": CATALOGO,
+        "drops": DROPS,
+        "comunidad": COMUNIDAD,
+        "colabs": COLABS,
+        "contacto": CONTACTO,
+        "alerta": ALERTA,
+    }
+
+    keyboard = main_keyboard() if data == "menu" else back_keyboard()
+    text = texts.get(data, WELCOME)
+
+    await query.edit_message_text(
+        text=text, parse_mode="Markdown", reply_markup=keyboard
+    )
+
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message.text.lower()
+    if any(w in msg for w in ["hola", "hello", "hi", "hey", "buenas"]):
+        await update.message.reply_text(
+            "\U0001f5a4 Que hay! Bienvenid@ a Kemical Addiction.\nUsa el menu para explorar.",
+            reply_markup=main_keyboard()
         )
-        await update.message.reply_text(response.choices[0].message.content)
-    except Exception as e:
-        logger.error(f"OpenAI error: {e}")
-        await update.message.reply_text("💥 Ocurrió un error en el motor de pensamiento. Intenta de nuevo.")
+    elif any(w in msg for w in ["precio", "costo", "cuanto", "price"]):
+        await update.message.reply_text(
+            "\U0001f4b0 Los precios varian segun la pieza y el drop.\nRevisa el catalogo completo:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("\U0001f6cd Ver Catalogo", callback_data="catalogo")
+            ]])
+        )
+    elif any(w in msg for w in ["envio", "shipping", "enviar", "deliver"]):
+        await update.message.reply_text(
+            "\U0001f69a *ENVIOS KEMICAL*\n\n"
+            "\U0001f1f5\U0001f1f7 Puerto Rico: 2-3 dias habiles\n"
+            "\U0001f1fa\U0001f1f8 EEUU Continental: 4-7 dias\n"
+            "\U0001f310 Internacional: Consultar\n\n"
+            "Para rastrear tu orden escribe a: info@kemicaladdiction.com",
+            parse_mode="Markdown",
+            reply_markup=back_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            "\U0001f5a4 Gracias por escribir.\nNuestro equipo te contactara pronto.\n\nMientras tanto, explora:",
+            reply_markup=main_keyboard()
+        )
 
-# ======== CORE SERVERLESS PATTERN ========
-async def process_update(token: str, data: dict):
-    application = Application.builder().token(token).build()
-    application.add_handler(CommandHandler('start', cmd_start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    async with application:
-        update = Update.de_json(data, application.bot)
-        await application.process_update(update)
+# ── REGISTER HANDLERS ──────────────────────────────────────────────────────
 
-# ======== FLASK ROUTES ========
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        data = request.get_json(force=True)
-        asyncio.run(process_update(TOKEN, data))
-        return jsonify({'ok': True})
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return jsonify({'ok': False, 'error': str(e)}), 500
+ptb_app.add_handler(CommandHandler("start", start))
+ptb_app.add_handler(CommandHandler("alerta", alerta_command))
+ptb_app.add_handler(CallbackQueryHandler(button_handler))
+ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-@app.route('/')
+# ── FLASK ROUTES ───────────────────────────────────────────────────────────
+
+@app.route("/", methods=["GET"])
 def index():
-    return jsonify({'status': 'running', 'bot': 'KEG'})
-@app.route('/health')
-def health():
-  return jsonify({'status': 'healthy', 'bot': 'KEG'})
+    return "\U0001f5a4 Kemical Addiction Bot LIVE", 200
 
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    import asyncio
+    import json
+    data = request.get_json(force=True)
+    update = Update.de_json(data, ptb_app.bot)
+    asyncio.run(ptb_app.process_update(update))
+    return "ok", 200
 
-if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+@app.route("/set_webhook", methods=["GET"])
+def set_webhook():
+    import asyncio
+    async def _set():
+        await ptb_app.bot.set_webhook(url=WEBHOOK_URL)
+    asyncio.run(_set())
+    return f"Webhook set to {WEBHOOK_URL}", 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
